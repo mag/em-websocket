@@ -53,9 +53,10 @@ module EventMachine
         if complete_header_received?(data) && is_standard_http?(data)
           proxy_class = @options[:standard_connection_class]
           proxy = proxy_class.new
-          if !@post_init_called
+          if !@standard_connection_initialized
+            proxy.actual_connection = self
             proxy.post_init
-            @post_init_called = true
+            @standard_connection_initialized = true
           end
           proxy.receive_data(data)
           send_data "HTTP/1.1 200 OK\r\n\r\n"

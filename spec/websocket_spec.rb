@@ -92,6 +92,12 @@ describe EventMachine::WebSocket do
       end
     end
 
+    class FakeMongrelConnection
+      def post_init; end
+      def receive_data(data); end
+      def actual_connection=(conn); end
+    end
+
     it "should not fail" do
       EM.run do
         fire_normal_http_request_in_future
@@ -99,12 +105,7 @@ describe EventMachine::WebSocket do
       end
     end
 
-    class FakeMongrelConnection
-      def post_init; end
-      def receive_data(data); end
-    end
-
-    it "should forward all received data to a new instance of given connection class" do
+    it "should forward all received data to a new instance of given standard connection class" do
       received_data = ""
       EM.run do
         fire_normal_http_request_in_future
@@ -122,7 +123,7 @@ describe EventMachine::WebSocket do
       lines[1].strip.should == "User-Agent: EventMachine HttpClient"
     end
 
-    it "should call post_init on the given connection proxy object" do
+    it "should call post_init on the standard connection object" do
       EM.run do
         fire_normal_http_request_in_future
         instance = FakeMongrelConnection.new
@@ -132,6 +133,19 @@ describe EventMachine::WebSocket do
         end
         start_server(FakeMongrelConnection)
       end
+    end
+
+    it "should give a copy of the actual connection to the standard connection so the latter can write data" do
+      EM.run do
+        fire_normal_http_request_in_future
+        instance = FakeMongrelConnection.new
+        FakeMongrelConnection.stub(:new) do
+          instance.should_receive(:actual_connection=).with(instance_of(EventMachine::WebSocket::Connection))
+          instance
+        end
+        start_server(FakeMongrelConnection)
+      end
+
     end
   end
 
