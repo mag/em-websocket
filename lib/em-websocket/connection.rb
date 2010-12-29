@@ -51,7 +51,13 @@ module EventMachine
       def receive_data(data)
         debug [:receive_data, data]
         if complete_header_received?(data) && is_standard_http?(data)
-          @options[:non_websocket_receiver].receive_data(data)
+          proxy_class = @options[:standard_connection_class]
+          proxy = proxy_class.new
+          if !@post_init_called
+            proxy.post_init
+            @post_init_called = true
+          end
+          proxy.receive_data(data)
           send_data "HTTP/1.1 200 OK\r\n\r\n"
           close_connection_after_writing
           return

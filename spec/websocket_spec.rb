@@ -76,67 +76,64 @@ describe EventMachine::WebSocket do
   end
 
   context "when the client sends standard http traffic" do
-    it "should not fail" do
-      EM.run do
-        EventMachine.add_timer(0.1) do
-          http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
-          http.errback { failed }
-          http.callback { http.response_header.status.should == 200; EventMachine.stop }
-        end
-
-        (proxy = Object.new).stub!(:receive_data)
-        EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345, :non_websocket_receiver => proxy) do |ws|
-          ws.onopen { failed }
-          ws.onclose { failed }
-          ws.onerror { failed }
-        end
+    def fire_normal_http_request_in_future
+      EventMachine.add_timer(0.1) do
+        http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
+        http.errback { failed }
+        http.callback { http.response_header.status.should == 200; EventMachine.stop }
       end
     end
 
-    it "should forward all the data to the given connection proxy object" do
+    def start_server(proxy)
+      EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345, :standard_connection_class => proxy) do |ws|
+        ws.onopen { failed }
+        ws.onclose { failed }
+        ws.onerror { failed }
+      end
+    end
+
+    it "should not fail" do
+      EM.run do
+        fire_normal_http_request_in_future
+        start_server(FakeMongrelConnection)
+      end
+    end
+
+    class FakeMongrelConnection
+      def post_init; end
+      def receive_data(data); end
+    end
+
+    it "should forward all received data to a new instance of given connection class" do
       received_data = ""
       EM.run do
-        EventMachine.add_timer(0.1) do
-          http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
-          http.callback { EventMachine.stop }
+        fire_normal_http_request_in_future
+        instance = FakeMongrelConnection.new
+        FakeMongrelConnection.stub(:new) do
+          instance.stub!(:receive_data) do |data|
+            received_data << data
+          end
+          instance
         end
-
-        (proxy = Object.new).stub!(:receive_data) do |data|
-          received_data << data
-        end
-        EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345, :non_websocket_receiver => proxy) do |ws|
-          ws.onopen { failed }
-          ws.onclose { failed }
-          ws.onerror { failed }
-        end
+        start_server(FakeMongrelConnection)
       end
       lines = received_data.split("\n")
       lines[0].strip.should == "GET / HTTP/1.1"
       lines[1].strip.should == "User-Agent: EventMachine HttpClient"
-
     end
 
+    it "should call post_init on the given connection proxy object" do
+      EM.run do
+        fire_normal_http_request_in_future
+        instance = FakeMongrelConnection.new
+        FakeMongrelConnection.stub(:new) do
+          instance.should_receive(:post_init)
+          instance
+        end
+        start_server(FakeMongrelConnection)
+      end
+    end
   end
-
-#  it "should call onerror callback with raised exception and close connection on bad handshake" do
-#    EM.run do
-#      EventMachine.add_timer(0.1) do
-#        http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
-#        http.errback { http.response_header.status.should == 0 }
-#        http.callback { failed }
-#      end
-#
-#      EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345) do |ws|
-#        ws.onopen { failed }
-#        ws.onclose { EventMachine.stop }
-#        ws.onerror {|e|
-#          e.should be_an_instance_of EventMachine::WebSocket::HandshakeError
-#          e.message.should match('Connection and Upgrade headers required')
-#          EventMachine.stop
-#        }
-#      end
-#    end
-#  end
 
   it "should populate ws.request with appropriate headers" do
     EM.run do
