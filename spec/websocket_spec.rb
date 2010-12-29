@@ -92,10 +92,19 @@ describe EventMachine::WebSocket do
       end
     end
 
+
+    # Fake standard connection that sends back a 200 OK and closes the connection
     class FakeMongrelConnection
+      attr_writer :actual_connection
+      attr_reader :received_data
       def post_init; end
-      def receive_data(data); end
-      def actual_connection=(conn); end
+      def receive_data(data)
+        @received_data ||= ""
+        @received_data << data
+        if @received_data.split("\n").last.strip == ""
+          @actual_connection.send_data "HTTP/1.1 200 OK\r\n\r\nFAKE RESPONSE"
+        end
+      end
     end
 
     it "should not fail" do
@@ -106,19 +115,14 @@ describe EventMachine::WebSocket do
     end
 
     it "should forward all received data to a new instance of given standard connection class" do
-      received_data = ""
+      instance = nil
       EM.run do
         fire_normal_http_request_in_future
         instance = FakeMongrelConnection.new
-        FakeMongrelConnection.stub(:new) do
-          instance.stub!(:receive_data) do |data|
-            received_data << data
-          end
-          instance
-        end
+        FakeMongrelConnection.stub(:new) {instance}
         start_server(FakeMongrelConnection)
       end
-      lines = received_data.split("\n")
+      lines = instance.received_data.split("\n")
       lines[0].strip.should == "GET / HTTP/1.1"
       lines[1].strip.should == "User-Agent: EventMachine HttpClient"
     end
@@ -137,12 +141,17 @@ describe EventMachine::WebSocket do
 
     it "should give a copy of the actual connection to the standard connection so the latter can write data" do
       EM.run do
-        fire_normal_http_request_in_future
-        instance = FakeMongrelConnection.new
-        FakeMongrelConnection.stub(:new) do
-          instance.should_receive(:actual_connection=).with(instance_of(EventMachine::WebSocket::Connection))
-          instance
+        EventMachine.add_timer(0.1) do
+          http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
+          http.errback { failed }
+          http.callback do
+            http.response_header.status.should == 200
+            http.response.should =~ %r|FAKE RESPONSE|
+            EventMachine.stop
+          end
         end
+        instance = FakeMongrelConnection.new
+        FakeMongrelConnection.stub(:new) { instance }
         start_server(FakeMongrelConnection)
       end
 

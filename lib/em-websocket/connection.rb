@@ -59,7 +59,6 @@ module EventMachine
             @standard_connection_initialized = true
           end
           proxy.receive_data(data)
-          send_data "HTTP/1.1 200 OK\r\n\r\n"
           close_connection_after_writing
           return
         end
