@@ -50,7 +50,12 @@ module EventMachine
 
       def receive_data(data)
         debug [:receive_data, data]
-
+        if complete_header_received?(data) && is_standard_http?(data)
+          @options[:non_websocket_receiver].receive_data(data)
+          send_data "HTTP/1.1 200 OK\r\n\r\n"
+          close_connection_after_writing
+          return
+        end
         if @handler
           @handler.receive_data(data)
         else
@@ -62,6 +67,58 @@ module EventMachine
         debug [:unbind, :connection]
 
         @handler.unbind if @handler
+      end
+
+      def parse_out_headers_and_body(data)
+        data.split("\r\n\r\n", 2)
+      end
+
+      def complete_header_received?(data)
+        (header, remains) = parse_out_headers_and_body(data)
+        !remains.nil?
+      end
+
+      def is_standard_http?(data)
+        unless complete_header_received?(data)
+          raise "Cannot determine if this is standard HTTP until all headers received"
+        end
+
+        (header, remains) = parse_out_headers_and_body(data)
+        begin
+          request = request_hash_from_headers(header)
+          !(request['Connection'] == 'Upgrade' and request['Upgrade'] == 'WebSocket')
+        rescue HandshakeError
+          false
+        end
+      end
+
+      PATH   = /^(\w+) (\/[^\s]*) HTTP\/1\.1$/
+      HEADER = /^([^:]+):\s*(.+)$/
+
+      def request_hash_from_headers(headers)
+        # ripped off from HandlerFactory. TODO: combine.
+        request = {}
+        lines = headers.split("\r\n")
+
+        # extract request path
+        first_line = lines.shift.match(PATH)
+        raise HandshakeError, "Invalid HTTP header" unless first_line
+        request['Method'] = first_line[1].strip
+        request['Path'] = first_line[2].strip
+
+        unless request["Method"] == "GET"
+          raise HandshakeError, "Must be GET request"
+        end
+
+        # extract query string values
+        request['Query'] = Addressable::URI.parse(request['Path']).query_values ||= {}
+        # extract remaining headers
+        lines.each do |line|
+          h = HEADER.match(line)
+          request[h[1].strip] = h[2].strip if h
+        end
+
+        request
       end
 
       def dispatch(data)

@@ -24,21 +24,6 @@ describe EventMachine::WebSocket do
     end
   end
 
-  it "should fail on non WebSocket requests" do
-    EM.run do
-      EventMachine.add_timer(0.1) do
-        http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
-        http.errback { failed }
-        http.callback {
-          http.response_header.status.should == 400
-          EventMachine.stop
-        }
-      end
-
-      EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345) {}
-    end
-  end
-
   it "should split multiple messages into separate callbacks" do
     EM.run do
       messages = %w[1 2]
@@ -90,25 +75,68 @@ describe EventMachine::WebSocket do
     end
   end
 
-  it "should call onerror callback with raised exception and close connection on bad handshake" do
-    EM.run do
-      EventMachine.add_timer(0.1) do
-        http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
-        http.errback { http.response_header.status.should == 0 }
-        http.callback { failed }
-      end
+  context "when the client sends standard http traffic" do
+    it "should not fail" do
+      EM.run do
+        EventMachine.add_timer(0.1) do
+          http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
+          http.errback { failed }
+          http.callback { http.response_header.status.should == 200; EventMachine.stop }
+        end
 
-      EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345) do |ws|
-        ws.onopen { failed }
-        ws.onclose { EventMachine.stop }
-        ws.onerror {|e|
-          e.should be_an_instance_of EventMachine::WebSocket::HandshakeError
-          e.message.should match('Connection and Upgrade headers required')
-          EventMachine.stop
-        }
+        (proxy = Object.new).stub!(:receive_data)
+        EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345, :non_websocket_receiver => proxy) do |ws|
+          ws.onopen { failed }
+          ws.onclose { failed }
+          ws.onerror { failed }
+        end
       end
     end
+
+    it "should forward all the data to the given connection proxy object" do
+      received_data = ""
+      EM.run do
+        EventMachine.add_timer(0.1) do
+          http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
+          http.callback { EventMachine.stop }
+        end
+
+        (proxy = Object.new).stub!(:receive_data) do |data|
+          received_data << data
+        end
+        EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345, :non_websocket_receiver => proxy) do |ws|
+          ws.onopen { failed }
+          ws.onclose { failed }
+          ws.onerror { failed }
+        end
+      end
+      lines = received_data.split("\n")
+      lines[0].strip.should == "GET / HTTP/1.1"
+      lines[1].strip.should == "User-Agent: EventMachine HttpClient"
+
+    end
+
   end
+
+#  it "should call onerror callback with raised exception and close connection on bad handshake" do
+#    EM.run do
+#      EventMachine.add_timer(0.1) do
+#        http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
+#        http.errback { http.response_header.status.should == 0 }
+#        http.callback { failed }
+#      end
+#
+#      EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 12345) do |ws|
+#        ws.onopen { failed }
+#        ws.onclose { EventMachine.stop }
+#        ws.onerror {|e|
+#          e.should be_an_instance_of EventMachine::WebSocket::HandshakeError
+#          e.message.should match('Connection and Upgrade headers required')
+#          EventMachine.stop
+#        }
+#      end
+#    end
+#  end
 
   it "should populate ws.request with appropriate headers" do
     EM.run do
