@@ -59,7 +59,6 @@ module EventMachine
             @standard_connection_initialized = true
           end
           proxy.receive_data(data)
-          close_connection_after_writing
           return
         end
         if @handler

@@ -103,6 +103,7 @@ describe EventMachine::WebSocket do
         @received_data << data
         if @received_data.split("\n").last.strip == ""
           @actual_connection.send_data "HTTP/1.1 200 OK\r\n\r\nFAKE RESPONSE"
+          @actual_connection.close_connection_after_writing
         end
       end
     end
