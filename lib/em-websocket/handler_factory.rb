@@ -6,6 +6,7 @@ module EventMachine
 
       def self.build(connection, data, secure = false, debug = false)
         (header, remains) = data.split("\r\n\r\n", 2)
+
         unless remains
           # The whole header has not been received yet.
           return nil

@@ -68,3 +68,22 @@ RSpec::Matchers.define :send_handshake do |response|
     actual.handshake.lines.sort == format_response(response).lines.sort
   end
 end
+
+# Fake standard connection that sends back a 200 OK and closes the connection
+class FakeStandardConnection
+  attr_writer :actual_connection
+  attr_reader :received_data
+
+  def post_init;
+  end
+
+  def receive_data(data)
+    @received_data ||= ""
+    @received_data << data
+    if @received_data.split("\n").last.strip == ""
+      @actual_connection.send_data "HTTP/1.1 200 OK\r\n\r\nFAKE RESPONSE"
+      @actual_connection.close_connection_after_writing
+    end
+  end
+end
+

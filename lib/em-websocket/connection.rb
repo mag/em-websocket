@@ -27,7 +27,8 @@ module EventMachine
         @secure = options[:secure] || false
         @tls_options = options[:tls_options] || {}
         @request = {}
-        @data = ''
+        @undetermined_data = ''
+        @connection_determination_state = "undetermined_connection"
 
         debug [:initialize]
       end
@@ -50,22 +51,36 @@ module EventMachine
 
       def receive_data(data)
         debug [:receive_data, data]
-        if complete_header_received?(data) && is_standard_http?(data)
-          proxy_class = @options[:standard_connection_class]
-          proxy = proxy_class.new
-          if !@standard_connection_initialized
-            proxy.actual_connection = self
-            proxy.post_init
-            @standard_connection_initialized = true
-          end
-          proxy.receive_data(data)
-          return
-        end
-        if @handler
+        if @connection_determination_state == "websocket_connection"
           @handler.receive_data(data)
+        elsif @connection_determination_state == "standard_connection"
+          @proxy.receive_data(data)
+        elsif @connection_determination_state == "undetermined_connection"
+          @undetermined_data == @undetermined_data << data
+          if complete_header_received?(@undetermined_data)
+            if is_standard_http?(@undetermined_data)
+              proxy_class = @options[:standard_connection_class]
+              @proxy = proxy_class.new
+              if !@standard_connection_initialized
+                @proxy.actual_connection = self
+                @proxy.post_init
+                @standard_connection_initialized = true
+              end
+              @proxy.receive_data(@undetermined_data)
+              @undetermined_data = nil
+              @connection_determination_state = "standard_connection"
+            else
+              @connection_determination_state = "websocket_connection"
+              dispatch(@undetermined_data)
+            end
+          else
+            # header incomplete
+          end
+
         else
-          dispatch(data)
+          raise "Unknown state: #{@connection_determination_state}"
         end
+
       end
 
       def unbind
@@ -133,13 +148,7 @@ module EventMachine
         else
           debug [:inbound_headers, data]
           begin
-            @data << data
-            @handler = HandlerFactory.build(self, @data, @secure, @debug)
-            unless @handler
-              # The whole header has not been received yet.
-              return false
-            end
-            @data = nil
+            @handler = HandlerFactory.build(self, data, @secure, @debug)
             @handler.run
             return true
           rescue => e

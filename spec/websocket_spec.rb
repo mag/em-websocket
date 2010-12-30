@@ -76,6 +76,7 @@ describe EventMachine::WebSocket do
   end
 
   context "when the client sends standard http traffic" do
+
     def fire_normal_http_request_in_future
       EventMachine.add_timer(0.1) do
         http = EventMachine::HttpRequest.new('http://127.0.0.1:12345/').get :timeout => 0
@@ -92,26 +93,10 @@ describe EventMachine::WebSocket do
       end
     end
 
-
-    # Fake standard connection that sends back a 200 OK and closes the connection
-    class FakeMongrelConnection
-      attr_writer :actual_connection
-      attr_reader :received_data
-      def post_init; end
-      def receive_data(data)
-        @received_data ||= ""
-        @received_data << data
-        if @received_data.split("\n").last.strip == ""
-          @actual_connection.send_data "HTTP/1.1 200 OK\r\n\r\nFAKE RESPONSE"
-          @actual_connection.close_connection_after_writing
-        end
-      end
-    end
-
     it "should not fail" do
       EM.run do
         fire_normal_http_request_in_future
-        start_server(FakeMongrelConnection)
+        start_server(FakeStandardConnection)
       end
     end
 
@@ -119,9 +104,9 @@ describe EventMachine::WebSocket do
       instance = nil
       EM.run do
         fire_normal_http_request_in_future
-        instance = FakeMongrelConnection.new
-        FakeMongrelConnection.stub(:new) {instance}
-        start_server(FakeMongrelConnection)
+        instance = FakeStandardConnection.new
+        FakeStandardConnection.stub(:new) {instance}
+        start_server(FakeStandardConnection)
       end
       lines = instance.received_data.split("\n")
       lines[0].strip.should == "GET / HTTP/1.1"
@@ -131,12 +116,12 @@ describe EventMachine::WebSocket do
     it "should call post_init on the standard connection object" do
       EM.run do
         fire_normal_http_request_in_future
-        instance = FakeMongrelConnection.new
-        FakeMongrelConnection.stub(:new) do
+        instance = FakeStandardConnection.new
+        FakeStandardConnection.stub(:new) do
           instance.should_receive(:post_init)
           instance
         end
-        start_server(FakeMongrelConnection)
+        start_server(FakeStandardConnection)
       end
     end
 
@@ -151,9 +136,9 @@ describe EventMachine::WebSocket do
             EventMachine.stop
           end
         end
-        instance = FakeMongrelConnection.new
-        FakeMongrelConnection.stub(:new) { instance }
-        start_server(FakeMongrelConnection)
+        instance = FakeStandardConnection.new
+        FakeStandardConnection.stub(:new) { instance }
+        start_server(FakeStandardConnection)
       end
 
     end
